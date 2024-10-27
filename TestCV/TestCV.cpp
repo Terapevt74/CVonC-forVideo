@@ -1,49 +1,48 @@
-#include </home/sergey/opencv/include/opencv2/opencv.hpp>
+#include <opencv2/opencv.hpp>
 #include <iostream>
 
 int main() {
-    // Открываем первую камеру
-    cv::VideoCapture cap('/home/sergey/Code/ProjectsC++/video/VideoANsys.mp4');
+    cv::VideoCapture cap(0);
     if (!cap.isOpened()) {
         std::cerr << "Ошибка открытия видео!" << std::endl;
         return -1;
     }
 
     cv::Mat frame, gray, prevGray, diff, blurred, thresh;
+    cv::Ptr<cv::BackgroundSubtractor> bgSubtractor = cv::createBackgroundSubtractorMOG2();
 
     while (true) {
-        // Читаем текущий кадр
         cap >> frame;
         if (frame.empty()) break;
 
-        // Преобразуем кадр в оттенки серого
+        // Преобразуем кадр в градации серого и размываем
         cv::cvtColor(frame, gray, cv::COLOR_BGR2GRAY);
+        cv::GaussianBlur(gray, blurred, cv::Size(3, 3), 0);
 
-        // Применяем размытие для уменьшения шума
-        cv::GaussianBlur(gray, blurred, cv::Size(5, 5), 0);
+        // Применяем фоновую модель
+        bgSubtractor->apply(blurred, diff);
 
-        if (!prevGray.empty()) {
-            // Вычисляем разницу между текущим и предыдущим кадром
-            cv::absdiff(prevGray, blurred, diff);
+        // Устранение шумов через morph
+        cv::morphologyEx(diff, diff, cv::MORPH_CLOSE, cv::Mat(), cv::Point(-1, -1), 2);
 
-            // Применяем адаптивную пороговую обработку
-            cv::adaptiveThreshold(
-                diff, thresh, 255, 
-                cv::ADAPTIVE_THRESH_GAUSSIAN_C, cv::THRESH_BINARY, 11, 2
-            );
+        // Применяем пороговую обработку
+        cv::threshold(diff, thresh, 25, 255, cv::THRESH_BINARY);
 
-            // Применяем морфологические операции для удаления мелких шумов
-            cv::erode(thresh, thresh, cv::Mat(), cv::Point(-1, -1), 2);
-            cv::dilate(thresh, thresh, cv::Mat(), cv::Point(-1, -1), 2);
+        // Находим контуры и обводим большие объекты
+        std::vector<std::vector<cv::Point>> contours;
+        cv::findContours(thresh, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
 
-            // Отображаем результат
-            cv::imshow("Motion Detection", thresh);
+        for (const auto & contour : contours) {
+            double area = cv::contourArea(contour);
+            if (area > 450 && area < 5000) {  // Фильтрация по площади
+                cv::Rect boundingBox = cv::boundingRect(contour);
+                cv::rectangle(frame, boundingBox, cv::Scalar(0, 255, 0), 2);
+            }
         }
 
-        // Сохраняем текущий кадр как предыдущий для следующей итерации
-        blurred.copyTo(prevGray);
+        // Отображаем результат
+        cv::imshow("Motion Detection", frame);
 
-        // Ожидаем нажатия клавиши 'q' для выхода
         if (cv::waitKey(30) == 'q') break;
     }
 
